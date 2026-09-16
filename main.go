@@ -23,34 +23,36 @@ type Client struct {
 	Pending []byte
 }
 
-type ParsedReq struct {
-	Req     Request
-	Pending []byte
-}
-
 func parseRequest(client *Client) (Request, error) {
-	buf := make([]byte, 8)
+	buf := make([]byte, 1024)
 
 	req := Request{
 		Headers: make(map[string][]string),
 		Body:    make([]byte, 0),
 	}
 
-	last_line_wo_crlf := append([]byte(nil), client.Pending...)
+	last_line_wo_crlf := make([]byte, 0)
 
 	requestLineReached := false
 	headersEndReached := false
 	body_start_idx := -1
 
 	for {
-		n, err := client.Conn.Read(buf)
-		if err != nil {
-			if n > 0 {
-				client.Pending = append([]byte(nil), buf[:n]...)
+		var n int
+		var err error = nil
+		if len(client.Pending) > 0 {
+			n = copy(buf, client.Pending)
+			client.Pending = append([]byte(nil), client.Pending[n:]...)
+		} else {
+			n, err = client.Conn.Read(buf)
+			if err != nil {
+				if n > 0 {
+					client.Pending = append([]byte(nil), buf[:n]...)
+				}
+				return req, err
 			}
-			return req, err
 		}
-		if n == 0 {
+		if n == 0 && len(client.Pending) == 0 {
 			return req, nil
 		}
 
@@ -72,7 +74,6 @@ func parseRequest(client *Client) (Request, error) {
 				// headers end
 				if bytes.Equal(line, []byte("\r\n")) {
 					headersEndReached = true
-					break
 				}
 
 				line_trimmed := bytes.Trim(line, "\r\n")
@@ -134,10 +135,9 @@ func parseRequest(client *Client) (Request, error) {
 func handleConn(conn net.Conn) {
 	defer conn.Close()
 
-	pending := make([]byte, 0)
 	client := Client{
 		Conn:    conn,
-		Pending: pending,
+		Pending: make([]byte, 0),
 	}
 
 	for {
